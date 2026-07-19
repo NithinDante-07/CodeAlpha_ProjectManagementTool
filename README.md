@@ -4,8 +4,6 @@ A Trello/Asana-style collaborative project tool with kanban boards, task assignm
 
 `Node.js` `Express` `SQLite` `Socket.IO` `bcrypt` `Sessions` `Vanilla JS`
 
-![screenshot placeholder](./screenshot.png)
-
 ## Why I built this
 
 Task 3 of a full-stack development challenge, with a bonus requirement: real-time updates. This pushed the project beyond a normal CRUD app — I had to learn how WebSocket "rooms" work (one room per project board) so that when one teammate drags a task or leaves a comment, everyone else looking at that board sees it happen instantly, with no page refresh.
