@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Basecamp — Projects</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="container">
+  <div class="page-head">
+    <h1>Your projects</h1>
+    <button class="btn" id="newProjectBtn">+ New project</button>
+  </div>
+  <div id="projectGrid">Loading…</div>
+</div>
+
+<footer>Task 3 — Project Management Tool · Full Stack Development Task List</footer>
+
+<div class="modal-backdrop" id="newProjectModal">
+  <div class="modal">
+    <h2>New project</h2>
+    <form id="newProjectForm">
+      <div class="field"><label>Project name</label><input type="text" id="pName" required></div>
+      <div class="field"><label>Description (optional)</label><textarea id="pDesc" rows="3"></textarea></div>
+      <p class="error" id="pErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="cancelNewProject">Cancel</button>
+        <button type="submit" class="btn">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app.js"></script>
+<script>
+let me = null;
+
+async function init() {
+  me = await loadNav();
+  if (!me) {
+    document.getElementById('projectGrid').innerHTML = `<div class="empty-state">Please <a href="/login.html" style="text-decoration:underline;">log in</a> to see your projects.</div>`;
+    document.getElementById('newProjectBtn').style.display = 'none';
+    return;
+  }
+  renderProjects();
+}
+
+async function renderProjects() {
+  const projects = await api('/api/projects');
+  const grid = document.getElementById('projectGrid');
+  if (projects.length === 0) {
+    grid.innerHTML = `<div class="empty-state">No projects yet. Create your first one.</div>`;
+    return;
+  }
+  grid.innerHTML = `<div class="project-grid">` + projects.map(p => `
+    <a class="project-card" href="/board.html?id=${p.id}">
+      <h3>${escapeHTML(p.name)}</h3>
+      <p>${escapeHTML(p.description) || 'No description.'}</p>
+      <div class="project-meta">
+        <span>📋 ${p.task_count} task${p.task_count === 1 ? '' : 's'}</span>
+        <span>👥 ${p.member_count} member${p.member_count === 1 ? '' : 's'}</span>
+      </div>
+    </a>
+  `).join('') + `</div>`;
+}
+
+document.getElementById('newProjectBtn').addEventListener('click', () => {
+  document.getElementById('newProjectModal').classList.add('open');
+});
+document.getElementById('cancelNewProject').addEventListener('click', () => {
+  document.getElementById('newProjectModal').classList.remove('open');
+});
+document.getElementById('newProjectForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const project = await api('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name: document.getElementById('pName').value, description: document.getElementById('pDesc').value })
+    });
+    window.location.href = '/board.html?id=' + project.id;
+  } catch (err) {
+    document.getElementById('pErr').textContent = err.message;
+  }
+});
+
+init();
+</script>
+</body>
+</html>

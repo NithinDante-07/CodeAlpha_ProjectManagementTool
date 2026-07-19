@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Basecamp — Board</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="container">
+  <div class="board-head">
+    <div>
+      <h1 id="projectName">Loading…</h1>
+      <p id="projectDesc"></p>
+      <div class="member-stack" id="memberStack"></div>
+    </div>
+    <div style="text-align:right;">
+      <span class="live-dot"><span class="dot"></span>Live</span><br>
+      <button class="btn ghost small" id="inviteBtn" style="margin-top:10px;">+ Invite member</button>
+    </div>
+  </div>
+
+  <div class="board-columns">
+    <div class="column" data-status="todo">
+      <div class="column-head"><h3>To do</h3><span class="column-count" id="count-todo">0</span></div>
+      <div class="task-list" id="list-todo"></div>
+      <button class="add-task-btn" data-status="todo">+ Add task</button>
+    </div>
+    <div class="column" data-status="in_progress">
+      <div class="column-head"><h3>In progress</h3><span class="column-count" id="count-in_progress">0</span></div>
+      <div class="task-list" id="list-in_progress"></div>
+      <button class="add-task-btn" data-status="in_progress">+ Add task</button>
+    </div>
+    <div class="column" data-status="done">
+      <div class="column-head"><h3>Done</h3><span class="column-count" id="count-done">0</span></div>
+      <div class="task-list" id="list-done"></div>
+      <button class="add-task-btn" data-status="done">+ Add task</button>
+    </div>
+  </div>
+</div>
+
+<!-- New task modal -->
+<div class="modal-backdrop" id="newTaskModal">
+  <div class="modal">
+    <h2>New task</h2>
+    <form id="newTaskForm">
+      <div class="field"><label>Title</label><input type="text" id="tTitle" required></div>
+      <div class="field"><label>Description (optional)</label><textarea id="tDesc" rows="3"></textarea></div>
+      <div class="field"><label>Assignee</label><select id="tAssignee"><option value="">Unassigned</option></select></div>
+      <p class="error" id="tErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="cancelNewTask">Cancel</button>
+        <button type="submit" class="btn">Add task</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Task detail modal -->
+<div class="modal-backdrop" id="taskDetailModal">
+  <div class="modal task-modal">
+    <h2 id="dTitle"></h2>
+    <p class="task-desc" id="dDesc"></p>
+    <div class="status-pills" id="dStatusPills"></div>
+    <div class="field"><label>Assignee</label><select id="dAssignee"></select></div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+      <span></span>
+      <button class="btn danger small" id="deleteTaskBtn">Delete task</button>
+    </div>
+    <h3 style="font-size:14px; margin-top:20px;">Comments</h3>
+    <div class="comment-list" id="dComments"></div>
+    <form class="comment-form" id="dCommentForm">
+      <input type="text" id="dCommentInput" placeholder="Write a comment…" required>
+      <button class="btn small" type="submit">Post</button>
+    </form>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="closeTaskDetail">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Invite modal -->
+<div class="modal-backdrop" id="inviteModal">
+  <div class="modal">
+    <h2>Invite member</h2>
+    <form id="inviteForm">
+      <div class="field"><label>Email address</label><input type="email" id="inviteEmail" required placeholder="teammate@example.com"></div>
+      <p class="hint">They must already have an account on Basecamp.</p>
+      <p class="error" id="inviteErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="cancelInvite">Cancel</button>
+        <button type="submit" class="btn">Send invite</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const projectId = params.get('id');
+let me = null;
+let project = null;
+let activeTaskId = null;
+
+const STATUSES = ['todo', 'in_progress', 'done'];
+
+async function init() {
+  me = await loadNav();
+  if (!me) { window.location.href = '/login.html'; return; }
+  await loadProject();
+  getSocket().emit('join_project', projectId);
+  wireSockets();
+  wireUI();
+}
+
+async function loadProject() {
+  project = await api('/api/projects/' + projectId);
+  document.getElementById('projectName').textContent = project.name;
+  document.getElementById('projectDesc').textContent = project.description || '';
+  document.getElementById('memberStack').innerHTML = project.members.map((m, i) => `
+    <div class="avatar ${i === 0 ? 'first' : ''}" style="background:${m.avatar_color}" title="${escapeHTML(m.name)}">${initials(m.name)}</div>
+  `).join('');
+
+  const assigneeOptions = `<option value="">Unassigned</option>` + project.members.map(m => `<option value="${m.id}">${escapeHTML(m.name)}</option>`).join('');
+  document.getElementById('tAssignee').innerHTML = assigneeOptions;
+  document.getElementById('dAssignee').innerHTML = assigneeOptions;
+
+  renderTasks();
+}
+
+function renderTasks() {
+  STATUSES.forEach(s => {
+    const list = document.getElementById('list-' + s);
+    const tasks = project.tasks.filter(t => t.status === s);
+    document.getElementById('count-' + s).textContent = tasks.length;
+    list.innerHTML = tasks.map(taskCardHTML).join('');
+  });
+  wireDragAndDrop();
+  wireTaskCardClicks();
+}
+
+function taskCardHTML(t) {
+  return `
+    <div class="task-card" draggable="true" data-task-id="${t.id}">
+      <h4>${escapeHTML(t.title)}</h4>
+      <div class="task-card-foot">
+        <div class="task-meta">
+          ${t.comment_count ? `<span>💬 ${t.comment_count}</span>` : ''}
+        </div>
+        ${t.assignee_id ? `<div class="avatar tiny" style="background:${t.assignee_color}" title="${escapeHTML(t.assignee_name)}">${initials(t.assignee_name)}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function wireTaskCardClicks() {
+  document.querySelectorAll('.task-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (card.classList.contains('just-dragged')) return;
+      openTaskDetail(parseInt(card.dataset.taskId));
+    });
+  });
+}
+
+function wireDragAndDrop() {
+  document.querySelectorAll('.task-card').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', card.dataset.taskId);
+      setTimeout(() => card.classList.add('dragging'), 0);
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  });
+  document.querySelectorAll('.column').forEach(col => {
+    col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drag-over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+    col.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      col.classList.remove('drag-over');
+      const taskId = e.dataTransfer.getData('text/plain');
+      const newStatus = col.dataset.status;
+      await api('/api/tasks/' + taskId, { method: 'PUT', body: JSON.stringify({ status: newStatus }) });
+    });
+  });
+}
+
+function openTaskDetail(taskId) {
+  const t = project.tasks.find(t => t.id === taskId);
+  if (!t) return;
+  activeTaskId = taskId;
+  document.getElementById('dTitle').textContent = t.title;
+  document.getElementById('dDesc').textContent = t.description || 'No description.';
+  document.getElementById('dStatusPills').innerHTML = STATUSES.map(s => `
+    <span class="status-pill ${s} ${s === t.status ? 'active' : ''}" data-status="${s}">${s === 'todo' ? 'To do' : s === 'in_progress' ? 'In progress' : 'Done'}</span>
+  `).join('');
+  document.getElementById('dAssignee').value = t.assignee_id || '';
+  document.querySelectorAll('.status-pill').forEach(pill => {
+    pill.addEventListener('click', async () => {
+      await api('/api/tasks/' + taskId, { method: 'PUT', body: JSON.stringify({ status: pill.dataset.status }) });
+    });
+  });
+  loadComments(taskId);
+  document.getElementById('taskDetailModal').classList.add('open');
+}
+
+async function loadComments(taskId) {
+  const comments = await api('/api/tasks/' + taskId + '/comments');
+  document.getElementById('dComments').innerHTML = comments.length ? comments.map(c => `
+    <div class="comment-row">
+      <div class="avatar tiny" style="background:${c.author_color}">${initials(c.author_name)}</div>
+      <div class="comment-bubble"><span class="comment-author">${escapeHTML(c.author_name)}</span>${escapeHTML(c.content)}</div>
+    </div>
+  `).join('') : `<p class="hint">No comments yet.</p>`;
+}
+
+function wireUI() {
+  document.querySelectorAll('.add-task-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('newTaskForm').dataset.status = btn.dataset.status;
+      document.getElementById('newTaskModal').classList.add('open');
+    });
+  });
+  document.getElementById('cancelNewTask').addEventListener('click', () => {
+    document.getElementById('newTaskModal').classList.remove('open');
+  });
+  document.getElementById('newTaskForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/api/projects/' + projectId + '/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: document.getElementById('tTitle').value,
+          description: document.getElementById('tDesc').value,
+          assignee_id: document.getElementById('tAssignee').value || null,
+          status: e.target.dataset.status
+        })
+      });
+      document.getElementById('newTaskModal').classList.remove('open');
+      document.getElementById('tTitle').value = '';
+      document.getElementById('tDesc').value = '';
+    } catch (err) {
+      document.getElementById('tErr').textContent = err.message;
+    }
+  });
+
+  document.getElementById('closeTaskDetail').addEventListener('click', () => {
+    document.getElementById('taskDetailModal').classList.remove('open');
+  });
+  document.getElementById('dAssignee').addEventListener('change', async (e) => {
+    await api('/api/tasks/' + activeTaskId, { method: 'PUT', body: JSON.stringify({ assignee_id: e.target.value || null }) });
+  });
+  document.getElementById('dCommentForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('dCommentInput');
+    await api('/api/tasks/' + activeTaskId + '/comments', { method: 'POST', body: JSON.stringify({ content: input.value }) });
+    input.value = '';
+  });
+  document.getElementById('deleteTaskBtn').addEventListener('click', async () => {
+    if (!confirm('Delete this task?')) return;
+    await api('/api/tasks/' + activeTaskId, { method: 'DELETE' });
+    document.getElementById('taskDetailModal').classList.remove('open');
+  });
+
+  document.getElementById('inviteBtn').addEventListener('click', () => {
+    document.getElementById('inviteModal').classList.add('open');
+  });
+  document.getElementById('cancelInvite').addEventListener('click', () => {
+    document.getElementById('inviteModal').classList.remove('open');
+  });
+  document.getElementById('inviteForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/api/projects/' + projectId + '/members', { method: 'POST', body: JSON.stringify({ email: document.getElementById('inviteEmail').value }) });
+      document.getElementById('inviteModal').classList.remove('open');
+      document.getElementById('inviteEmail').value = '';
+      loadProject();
+    } catch (err) {
+      document.getElementById('inviteErr').textContent = err.message;
+    }
+  });
+}
+
+function wireSockets() {
+  const s = getSocket();
+  s.on('task_created', (task) => {
+    project.tasks.push(task);
+    renderTasks();
+  });
+  s.on('task_updated', (task) => {
+    const idx = project.tasks.findIndex(t => t.id === task.id);
+    if (idx >= 0) project.tasks[idx] = task; else project.tasks.push(task);
+    renderTasks();
+    if (activeTaskId === task.id && document.getElementById('taskDetailModal').classList.contains('open')) {
+      openTaskDetail(task.id);
+    }
+  });
+  s.on('task_deleted', ({ id }) => {
+    project.tasks = project.tasks.filter(t => t.id !== id);
+    renderTasks();
+  });
+  s.on('comment_added', ({ task_id }) => {
+    const t = project.tasks.find(t => t.id === task_id);
+    if (t) t.comment_count = (t.comment_count || 0) + 1;
+    renderTasks();
+    if (activeTaskId === task_id) loadComments(task_id);
+  });
+  s.on('member_added', (member) => {
+    if (!project.members.find(m => m.id === member.id)) {
+      project.members.push(member);
+      loadProject();
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>

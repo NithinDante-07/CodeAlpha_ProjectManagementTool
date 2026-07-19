@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Basecamp — Sign up</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="auth-box">
+  <h2>Create account</h2>
+  <form id="regForm">
+    <div class="field"><label>Name</label><input type="text" id="name" required></div>
+    <div class="field"><label>Email</label><input type="email" id="email" required></div>
+    <div class="field"><label>Password</label><input type="password" id="password" required minlength="4"></div>
+    <button class="btn" type="submit" style="width:100%;">Sign up</button>
+    <p class="error" id="err"></p>
+  </form>
+  <p class="hint">Already have an account? <a href="/login.html" style="text-decoration:underline;">Log in</a></p>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app.js"></script>
+<script>
+loadNav();
+document.getElementById('regForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('name').value;
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  try {
+    await api('/api/register', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+    window.location.href = '/';
+  } catch (err) {
+    document.getElementById('err').textContent = err.message;
+  }
+});
+</script>
+</body>
+</html>
